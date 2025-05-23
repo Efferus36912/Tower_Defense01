@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fantasy Realm Tower Defense</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #2d1b69 0%, #11998e 100%);
+            font-family: 'Trebuchet MS', fantasy, serif;
+            color: #f4e4bc;
+            text-align: center;
+            min-height: 100vh;
+        }
+        
+        h1 {
+            color: #ffd700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .game-info {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        
+        .stat {
+            background: rgba(0,0,0,0.3);
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 2px solid #ffd700;
+        }
+        
+        canvas {
+            background: linear-gradient(45deg, #228B22 0%, #32CD32 50%, #90EE90 100%);
+            border: 4px solid #8B4513;
+            border-radius: 10px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            cursor: crosshair;
+        }
+        
+        .instructions {
+            margin-top: 15px;
+            background: rgba(0,0,0,0.4);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .tower-types {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 15px 0;
+        }
+        
+        .tower-btn {
+            background: linear-gradient(45deg, #4a4a4a, #6a6a6a);
+            border: 2px solid #ffd700;
+            color: #ffd700;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        .tower-btn:hover {
+            background: linear-gradient(45deg, #6a6a6a, #8a8a8a);
+            transform: scale(1.05);
+        }
+        
+        .tower-btn.selected {
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: #2d1b69;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚔️ Fantasy Realm Defense ⚔️</h1>
+    
+    <div class="game-info">
+        <div class="stat">💰 Gold: <span id="gold">100</span></div>
+        <div class="stat">❤️ Lives: <span id="lives">20</span></div>
+        <div class="stat">⚡ Wave: <span id="wave">1</span></div>
+        <div class="stat">🏆 Score: <span id="score">0</span></div>
+    </div>
+    
+    <div class="tower-types">
+        <button class="tower-btn selected" onclick="selectTower('archer')">🏹 Archer Tower (50g)</button>
+        <button class="tower-btn" onclick="selectTower('mage')">🔮 Mage Tower (80g)</button>
+        <button class="tower-btn" onclick="selectTower('cannon')">💥 Cannon Tower (120g)</button>
+    </div>
+    
+    <canvas id="game" width="800" height="500"></canvas>
+    
+    <div class="instructions">
+        <strong>🛡️ Defend the Realm!</strong><br>
+        Orcs are invading through the forest path! Click to place magical towers and stop them from reaching your castle.
+        <br><br>
+        <strong>🏹 Archer:</strong> Fast, cheap shots | <strong>🔮 Mage:</strong> Magic bolts | <strong>💥 Cannon:</strong> Explosive damage
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const gridSize = 40;
+        
+        // Game state
+        let gold = 100;
+        let lives = 20;
+        let wave = 1;
+        let score = 0;
+        let selectedTowerType = 'archer';
+        let enemySpawnTimer = 0;
+        let waveEnemyCount = 5;
+        let enemiesSpawned = 0;
+        
+        const towers = [];
+        const enemies = [];
+        const projectiles = [];
+        
+        // Path through the fantasy forest
+        const waypoints = [
+            {x: -20, y: 250},
+            {x: 150, y: 250},
+            {x: 150, y: 150},
+            {x: 350, y: 150},
+            {x: 350, y: 350},
+            {x: 550, y: 350},
+            {x: 550, y: 200},
+            {x: 750, y: 200},
+            {x: 820, y: 200}
+        ];
+        
+        const towerTypes = {
+            archer: { cost: 50, damage: 25, range: 100, fireRate: 30, color: '#8B4513', symbol: '🏹' },
+            mage: { cost: 80, damage: 40, range: 120, fireRate: 45, color: '#4B0082', symbol: '🔮' },
+            cannon: { cost: 120, damage: 80, range: 90, fireRate: 60, color: '#2F4F4F', symbol: '💥' }
+        };
+        
+        class Enemy {
+            constructor() {
+                this.x = waypoints[0].x;
+                this.y = waypoints[0].y;
+                this.speed = 1 + Math.random() * 0.5;
+                this.maxHp = 60 + (wave - 1) * 20;
+                this.hp = this.maxHp;
+                this.waypointIndex = 0;
+                this.size = 15;
+                this.color = '#8B0000';
+            }
+            
+            update() {
+                if (this.waypointIndex < waypoints.length - 1) {
+                    const target = waypoints[this.waypointIndex + 1];
+                    let dx = target.x - this.x;
+                    let dy = target.y - this.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < 5) {
+                        this.waypointIndex++;
+                    } else {
+                        this.x += (dx / dist) * this.speed;
+                        this.y += (dy / dist) * this.speed;
+                    }
+                } else {
+                    // Enemy reached the end
+                    lives--;
+                    updateUI();
+                    return false;
+                }
+                return true;
+            }
+            
+            draw() {
+                // Draw orc body
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+                
+                // Draw health bar
+                const barWidth = this.size;
+                const barHeight = 4;
+                ctx.fillStyle = 'red';
+                ctx.fillRect(this.x - barWidth/2, this.y - this.size/2 - 8, barWidth, barHeight);
+                ctx.fillStyle = 'green';
+                ctx.fillRect(this.x - barWidth/2, this.y - this.size/2 - 8, 
+                    barWidth * (this.hp / this.maxHp), barHeight);
+                
+                // Draw orc face
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(this.x - 2, this.y - 2, 4, 4);
+            }
+            
+            takeDamage(damage) {
+                this.hp -= damage;
+                return this.hp <= 0;
+            }
+        }
+        
+        class Tower {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.range = towerTypes[type].range;
+                this.damage = towerTypes[type].damage;
+                this.fireRate = towerTypes[type].fireRate;
+                this.cooldown = 0;
+                this.target = null;
+            }
+            
+            update() {
+                if (this.cooldown > 0) this.cooldown--;
+                
+                // Find target
+                this.target = null;
+                let closestDist = this.range;
+                
+                for (let enemy of enemies) {
+                    let dx = enemy.x - this.x;
+                    let dy = enemy.y - this.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < closestDist) {
+                        this.target = enemy;
+                        closestDist = dist;
+                    }
+                }
+                
+                // Shoot at target
+                if (this.target && this.cooldown === 0) {
+                    projectiles.push(new Projectile(this.x, this.y, this.target, this.damage, this.type));
+                    this.cooldown = this.fireRate;
+                }
+            }
+            
+            draw() {
+                // Draw tower base
+                ctx.fillStyle = towerTypes[this.type].color;
+                ctx.fillRect(this.x - 15, this.y - 15, 30, 30);
+                
+                // Draw tower symbol
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(towerTypes[this.type].symbol, this.x, this.y + 7);
+                
+                // Draw range circle when placing
+                if (this.showRange) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        class Projectile {
+            constructor(x, y, target, damage, type) {
+                this.x = x;
+                this.y = y;
+                this.targetX = target.x;
+                this.targetY = target.y;
+                this.target = target;
+                this.damage = damage;
+                this.speed = 8;
+                this.type = type;
+                
+                let dx = this.targetX - this.x;
+                let dy = this.targetY - this.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                this.vx = (dx / dist) * this.speed;
+                this.vy = (dy / dist) * this.speed;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Check if hit target
+                let dx = this.target.x - this.x;
+                let dy = this.target.y - this.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist < 10) {
+                    if (this.target.takeDamage(this.damage)) {
+                        score += 10;
+                        gold += 5;
+                        updateUI();
+                    }
+                    return false;
+                }
+                
+                // Remove if out of bounds
+                return this.x > -50 && this.x < canvas.width + 50 && 
+                       this.y > -50 && this.y < canvas.height + 50;
+            }
+            
+            draw() {
+                ctx.fillStyle = this.type === 'mage' ? '#FF69B4' : 
+                               this.type === 'cannon' ? '#FF4500' : '#FFD700';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        function selectTower(type) {
+            selectedTowerType = type;
+            document.querySelectorAll('.tower-btn').forEach(btn => btn.classList.remove('selected'));
+            event.target.classList.add('selected');
+        }
+        
+        function updateUI() {
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('lives').textContent = lives;
+            document.getElementById('wave').textContent = wave;
+            document.getElementById('score').textContent = score;
+        }
+        
+        function drawPath() {
+            ctx.strokeStyle = 'rgba(139, 69, 19, 0.8)';
+            ctx.lineWidth = 30;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            
+            for (let i = 0; i < waypoints.length - 1; i++) {
+                if (i === 0) {
+                    ctx.moveTo(waypoints[i].x, waypoints[i].y);
+                }
+                ctx.lineTo(waypoints[i + 1].x, waypoints[i + 1].y);
+            }
+            ctx.stroke();
+            
+            // Draw decorative path stones
+            ctx.fillStyle = 'rgba(105, 105, 105, 0.8)';
+            for (let i = 0; i < waypoints.length; i++) {
+                ctx.beginPath();
+                ctx.arc(waypoints[i].x, waypoints[i].y, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / gridSize) * gridSize + gridSize / 2;
+            const y = Math.floor((e.clientY - rect.top) / gridSize) * gridSize + gridSize / 2;
+            
+            // Check if can afford tower
+            if (gold < towerTypes[selectedTowerType].cost) return;
+            
+            // Check if position is valid (not on path)
+            let onPath = false;
+            for (let i = 0; i < waypoints.length - 1; i++) {
+                const wp1 = waypoints[i];
+                const wp2 = waypoints[i + 1];
+                
+                // Simple collision check with path
+                let dist = Math.abs((wp2.y - wp1.y) * x - (wp2.x - wp1.x) * y + wp2.x * wp1.y - wp2.y * wp1.x) /
+                          Math.sqrt(Math.pow(wp2.y - wp1.y, 2) + Math.pow(wp2.x - wp1.x, 2));
+                
+                if (dist < 35 && 
+                    x >= Math.min(wp1.x, wp2.x) - 20 && x <= Math.max(wp1.x, wp2.x) + 20 &&
+                    y >= Math.min(wp1.y, wp2.y) - 20 && y <= Math.max(wp1.y, wp2.y) + 20) {
+                    onPath = true;
+                    break;
+                }
+            }
+            
+            if (!onPath) {
+                towers.push(new Tower(x, y, selectedTowerType));
+                gold -= towerTypes[selectedTowerType].cost;
+                updateUI();
+            }
+        });
+        
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background elements
+            drawPath();
+            
+            // Spawn enemies
+            enemySpawnTimer++;
+            if (enemySpawnTimer >= 60 && enemiesSpawned < waveEnemyCount) {
+                enemies.push(new Enemy());
+                enemiesSpawned++;
+                enemySpawnTimer = 0;
+            }
+            
+            // Check for next wave
+            if (enemiesSpawned >= waveEnemyCount && enemies.length === 0) {
+                wave++;
+                waveEnemyCount += 3;
+                enemiesSpawned = 0;
+                updateUI();
+            }
+            
+            // Update and draw towers
+            for (let tower of towers) {
+                tower.update();
+                tower.draw();
+            }
+            
+            // Update and draw enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                if (!enemies[i].update()) {
+                    enemies.splice(i, 1);
+                }
+            }
+            
+            for (let enemy of enemies) {
+                enemy.draw();
+            }
+            
+            // Update and draw projectiles
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                if (!projectiles[i].update()) {
+                    projectiles.splice(i, 1);
+                }
+            }
+            
+            for (let projectile of projectiles) {
+                projectile.draw();
+            }
+            
+            // Check game over
+            if (lives <= 0) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#FF0000';
+                ctx.font = '48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('REALM FALLEN!', canvas.width/2, canvas.height/2);
+                ctx.fillStyle = '#FFD700';
+                ctx.font = '24px Arial';
+                ctx.fillText(`Final Score: ${score}`, canvas.width/2, canvas.height/2 + 50);
+                return;
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        updateUI();
+        gameLoop();
+    </script>
+</body>
+</html>
